@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ftrack-cache-v2';
+const CACHE_NAME = 'ftrack-cache-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -12,7 +12,9 @@ const ASSETS = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME)
+      .then(cache => Promise.all(ASSETS.map(url => fetch(url, { cache: 'reload' }).then(res => cache.put(url, res)))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -24,18 +26,23 @@ self.addEventListener('activate', event => {
   );
 });
 
+async function networkFirst(request) {
+  try {
+    const netRes = await fetch(request, { cache: 'no-store' });
+    if (netRes && netRes.status === 200) {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(request, netRes.clone());
+    }
+    return netRes;
+  } catch (err) {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    throw err;
+  }
+}
+
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
-  event.respondWith(
-    caches.match(event.request).then(cached => {
-      const fetchPromise = fetch(event.request).then(res => {
-        if (res && res.status === 200) {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return res;
-      }).catch(() => cached);
-      return cached || fetchPromise;
-    })
-  );
+  if (new URL(event.request.url).origin !== self.location.origin) return;
+  event.respondWith(networkFirst(event.request));
 });
