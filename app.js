@@ -40,7 +40,7 @@ let state = {
   }),
   settings: load(STORAGE_KEYS.settings, {
     geminiApiKey: '',
-    geminiModel: 'gemini-2.5-flash',
+    geminiModel: '',
   }),
   exerciseLibrary: load(STORAGE_KEYS.exerciseLibrary, null) || defaultExerciseLibrary(),
 };
@@ -529,11 +529,39 @@ function resizeImageToBase64(file, maxDim = 1024) {
   });
 }
 
-async function analyzeFoodPhoto(base64Data) {
-  const { geminiApiKey, geminiModel } = state.settings;
-  if (!geminiApiKey) throw new Error('NO_API_KEY');
-  const model = geminiModel || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiApiKey)}`;
+// Google periodically retires specific Gemini model versions for new API keys/projects
+// (e.g. gemini-2.5-flash was cut off for new users). Rather than hardcode a model name
+// that will eventually break, discover a currently-usable one from the account's own
+// model list, cache it, and re-discover automatically if it later stops working.
+async function discoverGeminiModel(apiKey, excludeName) {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    let reason = '';
+    try { reason = JSON.parse(errBody)?.error?.status || ''; } catch (e) { /* not JSON */ }
+    if (reason === 'API_KEY_INVALID' || reason === 'PERMISSION_DENIED') throw new Error('INVALID_KEY');
+    throw new Error('MODEL_LIST_FAILED: HTTP ' + res.status + ' ' + errBody.slice(0, 150));
+  }
+  const data = await res.json();
+  const candidates = (data.models || []).filter(m =>
+    Array.isArray(m.supportedGenerationMethods) &&
+    m.supportedGenerationMethods.includes('generateContent') &&
+    /flash/i.test(m.name) &&
+    !/vision|embedding|aqa|tts|image-generation|thinking/i.test(m.name) &&
+    m.name.replace(/^models\//, '') !== excludeName
+  );
+  candidates.sort((a, b) => {
+    const aLatest = /latest/i.test(a.name) ? 1 : 0;
+    const bLatest = /latest/i.test(b.name) ? 1 : 0;
+    if (aLatest !== bLatest) return bLatest - aLatest;
+    return b.name.localeCompare(a.name);
+  });
+  if (!candidates[0]) throw new Error('NO_USABLE_MODEL');
+  return candidates[0].name.replace(/^models\//, '');
+}
+
+async function callGemini(model, apiKey, base64Data) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const prompt = 'あなたは栄養士です。添付された食事の写真を見て、料理名（日本語、短く）と、写っている分量から推定した栄養価を返してください。次のJSON形式のみで出力し、説明文は付けないでください。数値は数字のみ（単位なし）。{"name": string, "calories": number, "protein_g": number, "fat_g": number, "carbs_g": number}';
 
   const res = await fetch(url, {
@@ -556,6 +584,7 @@ async function analyzeFoodPhoto(base64Data) {
     try { reason = JSON.parse(errBody)?.error?.status || ''; } catch (e) { /* not JSON */ }
     if (reason === 'API_KEY_INVALID' || reason === 'PERMISSION_DENIED') throw new Error('INVALID_KEY');
     if (res.status === 429 || reason === 'RESOURCE_EXHAUSTED') throw new Error('RATE_LIMIT');
+    if (res.status === 404 || reason === 'NOT_FOUND') throw new Error('MODEL_UNAVAILABLE: ' + errBody.slice(0, 200));
     throw new Error('API_ERROR: HTTP ' + res.status + (reason ? ' ' + reason : '') + ' ' + errBody.slice(0, 200));
   }
 
@@ -573,6 +602,27 @@ async function analyzeFoodPhoto(base64Data) {
     return JSON.parse(jsonText);
   } catch (e) {
     throw new Error('PARSE_ERROR: ' + text.slice(0, 200));
+  }
+}
+
+async function analyzeFoodPhoto(base64Data) {
+  const { geminiApiKey } = state.settings;
+  if (!geminiApiKey) throw new Error('NO_API_KEY');
+
+  if (!state.settings.geminiModel) {
+    state.settings.geminiModel = await discoverGeminiModel(geminiApiKey);
+    persist('settings');
+  }
+
+  try {
+    return await callGemini(state.settings.geminiModel, geminiApiKey, base64Data);
+  } catch (err) {
+    if (!err.message.startsWith('MODEL_UNAVAILABLE')) throw err;
+    // The cached model was retired since we last resolved it — rediscover once and retry.
+    const nextModel = await discoverGeminiModel(geminiApiKey, state.settings.geminiModel);
+    state.settings.geminiModel = nextModel;
+    persist('settings');
+    return await callGemini(nextModel, geminiApiKey, base64Data);
   }
 }
 
@@ -616,6 +666,8 @@ async function handlePhotoSelected(file) {
       statusEl.textContent = 'この写真はAIの安全フィルターによりブロックされました。別の写真でお試しください。';
     } else if (msg.startsWith('PARSE_ERROR') || msg.startsWith('EMPTY_RESPONSE')) {
       statusEl.textContent = 'AIの応答を解析できませんでした。もう一度お試しください。（詳細: ' + msg.slice(0, 120) + '）';
+    } else if (msg === 'NO_USABLE_MODEL' || msg.startsWith('MODEL_LIST_FAILED')) {
+      statusEl.textContent = '利用できるAIモデルが見つかりませんでした。しばらくしてから再度お試しください。（詳細: ' + msg.slice(0, 120) + '）';
     } else if (err instanceof TypeError) {
       statusEl.textContent = 'ネットワークに接続できませんでした。通信状況を確認してください。';
     } else {
