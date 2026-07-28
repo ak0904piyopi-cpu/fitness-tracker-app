@@ -552,14 +552,28 @@ async function analyzeFoodPhoto(base64Data) {
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    if (res.status === 400 || res.status === 403) throw new Error('INVALID_KEY');
-    throw new Error('API_ERROR: ' + res.status + ' ' + errBody.slice(0, 200));
+    let reason = '';
+    try { reason = JSON.parse(errBody)?.error?.status || ''; } catch (e) { /* not JSON */ }
+    if (reason === 'API_KEY_INVALID' || reason === 'PERMISSION_DENIED') throw new Error('INVALID_KEY');
+    if (res.status === 429 || reason === 'RESOURCE_EXHAUSTED') throw new Error('RATE_LIMIT');
+    throw new Error('API_ERROR: HTTP ' + res.status + (reason ? ' ' + reason : '') + ' ' + errBody.slice(0, 200));
   }
 
   const data = await res.json();
+  const blockReason = data?.promptFeedback?.blockReason;
+  if (blockReason) throw new Error('BLOCKED: ' + blockReason);
+
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('EMPTY_RESPONSE');
-  return JSON.parse(text);
+  if (!text) throw new Error('EMPTY_RESPONSE: ' + JSON.stringify(data).slice(0, 200));
+
+  let jsonText = text.trim();
+  const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) jsonText = fenceMatch[1].trim();
+  try {
+    return JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error('PARSE_ERROR: ' + text.slice(0, 200));
+  }
 }
 
 async function handlePhotoSelected(file) {
@@ -593,12 +607,19 @@ async function handlePhotoSelected(file) {
     toast('AIが推定しました');
   } catch (err) {
     console.error(err);
-    if (err.message === 'INVALID_KEY') {
+    const msg = err && err.message ? err.message : String(err);
+    if (msg === 'INVALID_KEY') {
       statusEl.textContent = 'APIキーが正しくないか無効です。設定を確認してください。';
-    } else if (err.message === 'EMPTY_RESPONSE') {
-      statusEl.textContent = '解析結果を取得できませんでした。もう一度お試しください。';
+    } else if (msg === 'RATE_LIMIT') {
+      statusEl.textContent = '無料枠の利用上限に達した可能性があります。しばらく待って再度お試しください。';
+    } else if (msg.startsWith('BLOCKED:')) {
+      statusEl.textContent = 'この写真はAIの安全フィルターによりブロックされました。別の写真でお試しください。';
+    } else if (msg.startsWith('PARSE_ERROR') || msg.startsWith('EMPTY_RESPONSE')) {
+      statusEl.textContent = 'AIの応答を解析できませんでした。もう一度お試しください。（詳細: ' + msg.slice(0, 120) + '）';
+    } else if (err instanceof TypeError) {
+      statusEl.textContent = 'ネットワークに接続できませんでした。通信状況を確認してください。';
     } else {
-      statusEl.textContent = '解析に失敗しました（通信エラーの可能性があります）';
+      statusEl.textContent = '解析に失敗しました（詳細: ' + msg.slice(0, 150) + '）';
     }
   } finally {
     statusEl.classList.remove('loading');
