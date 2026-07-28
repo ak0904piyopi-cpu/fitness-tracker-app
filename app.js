@@ -325,6 +325,33 @@ function escapeHtml(str) {
 }
 
 /* ================= WORKOUT ================= */
+const EXERCISE_LIBRARY = {
+  '胸': ['ベンチプレス', 'インクラインベンチプレス', 'ダンベルプレス', 'チェストプレス(マシン)', 'ペックフライ(マシン)', 'ダンベルフライ', 'ケーブルクロスオーバー', 'ディップス'],
+  '背中': ['ラットプルダウン(マシン)', 'シーテッドロウ(マシン)', 'ベントオーバーロウ', 'ワンハンドダンベルロウ', 'デッドリフト', '懸垂(チンニング)', 'Tバーロウ'],
+  '脚': ['スクワット', 'レッグプレス(マシン)', 'レッグエクステンション(マシン)', 'レッグカール(マシン)', 'ランジ', 'カーフレイズ', 'ヒップスラスト', 'ブルガリアンスクワット'],
+  '肩': ['ショルダープレス', 'サイドレイズ', 'リアレイズ', 'アップライトロウ', 'シュラッグ'],
+  '腕': ['アームカール', 'ハンマーカール', 'トライセプスプレスダウン(ケーブル)', 'ライイングトライセプスエクステンション', 'プリーチャーカール(マシン)'],
+  '腹': ['クランチ(マシン)', 'レッグレイズ', 'アブローラー', 'プランク', 'ロシアンツイスト'],
+};
+
+let selectedExerciseCategory = Object.keys(EXERCISE_LIBRARY)[0];
+let selectedExerciseName = null;
+
+function renderExerciseCategoryChips() {
+  const el = document.getElementById('exercise-category-chips');
+  el.innerHTML = Object.keys(EXERCISE_LIBRARY).map(cat =>
+    `<button type="button" class="chip ${cat === selectedExerciseCategory ? 'active' : ''}" data-category="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`
+  ).join('');
+}
+
+function renderExerciseItemChips() {
+  const el = document.getElementById('exercise-item-chips');
+  const items = EXERCISE_LIBRARY[selectedExerciseCategory] || [];
+  el.innerHTML = items.map(name =>
+    `<button type="button" class="chip ${name === selectedExerciseName ? 'selected' : ''}" data-exercise-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`
+  ).join('');
+}
+
 function renderWorkout() {
   document.querySelector('#workout-form [name="date"]').value =
     document.querySelector('#workout-form [name="date"]').value || todayStr();
@@ -341,6 +368,8 @@ function renderWorkout() {
     select.value = prevSelected;
   }
 
+  renderExerciseCategoryChips();
+  renderExerciseItemChips();
   renderWorkoutProgressChart();
   renderWorkoutHistory();
 }
@@ -701,8 +730,26 @@ function initForms() {
     f.weight.value = '';
     f.reps.value = '';
     f.sets.value = '1';
+    selectedExerciseName = null;
     toast('記録しました');
     renderWorkout();
+  });
+
+  document.getElementById('exercise-category-chips').addEventListener('click', e => {
+    const cat = e.target.getAttribute('data-category');
+    if (!cat) return;
+    selectedExerciseCategory = cat;
+    renderExerciseCategoryChips();
+    renderExerciseItemChips();
+  });
+
+  document.getElementById('exercise-item-chips').addEventListener('click', e => {
+    const name = e.target.getAttribute('data-exercise-name');
+    if (!name) return;
+    selectedExerciseName = name;
+    document.querySelector('#workout-form [name="exercise"]').value = name;
+    renderExerciseItemChips();
+    document.querySelector('#workout-form [name="weight"]').focus();
   });
 
   document.getElementById('workout-exercise-select').addEventListener('change', renderWorkoutProgressChart);
