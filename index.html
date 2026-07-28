@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>筋トレ&食事管理</title>
+<meta name="theme-color" content="#111827">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="筋トレ管理">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="topbar-title">ホーム</h1>
+  <div class="topbar-date" id="topbar-date"></div>
+</header>
+
+<main id="app">
+
+  <!-- ホーム -->
+  <section class="tab-panel" id="panel-home" data-panel="home">
+    <div class="card" id="home-phase-card"></div>
+
+    <div class="card">
+      <div class="card-title">今日の食事</div>
+      <div id="home-meal-summary"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">体重の推移</div>
+      <canvas id="home-weight-chart" height="160"></canvas>
+      <div id="home-weight-summary" class="muted small"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">今日の筋トレ</div>
+      <div id="home-workout-summary"></div>
+    </div>
+  </section>
+
+  <!-- 筋トレ -->
+  <section class="tab-panel hidden" id="panel-workout" data-panel="workout">
+    <form class="card form" id="workout-form">
+      <div class="card-title">セットを記録</div>
+      <label>日付
+        <input type="date" name="date" required>
+      </label>
+      <label>種目
+        <input type="text" name="exercise" list="exercise-list" placeholder="例: ベンチプレス" required>
+        <datalist id="exercise-list"></datalist>
+      </label>
+      <div class="row3">
+        <label>重量(kg)
+          <input type="number" name="weight" step="0.5" min="0" inputmode="decimal" required>
+        </label>
+        <label>回数
+          <input type="number" name="reps" step="1" min="1" inputmode="numeric" required>
+        </label>
+        <label>セット数
+          <input type="number" name="sets" step="1" min="1" value="1" inputmode="numeric" required>
+        </label>
+      </div>
+      <button type="submit" class="btn-primary">記録する</button>
+    </form>
+
+    <div class="card">
+      <div class="card-title-row">
+        <div class="card-title">種目ごとの推移</div>
+        <select id="workout-exercise-select"></select>
+      </div>
+      <canvas id="workout-progress-chart" height="160"></canvas>
+      <div id="workout-progress-empty" class="muted small hidden">この種目の記録はまだありません</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">履歴</div>
+      <div id="workout-history"></div>
+    </div>
+  </section>
+
+  <!-- 食事 -->
+  <section class="tab-panel hidden" id="panel-meal" data-panel="meal">
+    <form class="card form" id="meal-form">
+      <div class="card-title">食事を記録</div>
+      <label>日付
+        <input type="date" name="date" required>
+      </label>
+      <label>食品名・メニュー
+        <input type="text" name="name" placeholder="例: 鶏むね肉サラダ" required>
+      </label>
+      <div class="row2">
+        <label>カロリー(kcal)
+          <input type="number" name="calories" step="1" min="0" inputmode="numeric" required>
+        </label>
+        <label>タンパク質(g)
+          <input type="number" name="protein" step="0.1" min="0" inputmode="decimal" value="0">
+        </label>
+      </div>
+      <div class="row2">
+        <label>脂質(g)
+          <input type="number" name="fat" step="0.1" min="0" inputmode="decimal" value="0">
+        </label>
+        <label>炭水化物(g)
+          <input type="number" name="carbs" step="0.1" min="0" inputmode="decimal" value="0">
+        </label>
+      </div>
+      <button type="submit" class="btn-primary">記録する</button>
+    </form>
+
+    <div class="card">
+      <div class="card-title">今日の合計 / 目標</div>
+      <div id="meal-today-summary"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">履歴</div>
+      <input type="date" id="meal-history-date" class="date-filter">
+      <div id="meal-history"></div>
+    </div>
+  </section>
+
+  <!-- 体重 -->
+  <section class="tab-panel hidden" id="panel-weight" data-panel="weight">
+    <form class="card form" id="weight-form">
+      <div class="card-title">体重を記録</div>
+      <label>日付
+        <input type="date" name="date" required>
+      </label>
+      <div class="row2">
+        <label>体重(kg)
+          <input type="number" name="weight" step="0.1" min="0" inputmode="decimal" required>
+        </label>
+        <label>体脂肪率(%)任意
+          <input type="number" name="bodyFat" step="0.1" min="0" inputmode="decimal">
+        </label>
+      </div>
+      <button type="submit" class="btn-primary">記録する</button>
+    </form>
+
+    <div class="card">
+      <div class="card-title">推移グラフ</div>
+      <canvas id="weight-chart" height="180"></canvas>
+      <div id="weight-summary" class="muted small"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">履歴</div>
+      <div id="weight-history"></div>
+    </div>
+  </section>
+
+  <!-- 目標 -->
+  <section class="tab-panel hidden" id="panel-goal" data-panel="goal">
+    <form class="card form" id="goal-form">
+      <div class="card-title">目標設定</div>
+      <label>現在のフェーズ
+        <select name="phase">
+          <option value="cut">減量（脂肪を減らす）</option>
+          <option value="bulk">増量（筋肥大・バルクアップ）</option>
+        </select>
+      </label>
+      <div class="row2">
+        <label>開始体重(kg)
+          <input type="number" name="startWeight" step="0.1" min="0" inputmode="decimal">
+        </label>
+        <label>目標体重(kg)
+          <input type="number" name="targetWeight" step="0.1" min="0" inputmode="decimal">
+        </label>
+      </div>
+      <label>目標達成日
+        <input type="date" name="targetDate">
+      </label>
+
+      <div class="card-title" style="margin-top:12px">1日の摂取目標</div>
+      <label>目標カロリー(kcal)
+        <input type="number" name="targetCalories" step="10" min="0" inputmode="numeric">
+      </label>
+      <div class="row3">
+        <label>P(g)
+          <input type="number" name="targetProtein" step="1" min="0" inputmode="numeric">
+        </label>
+        <label>F(g)
+          <input type="number" name="targetFat" step="1" min="0" inputmode="numeric">
+        </label>
+        <label>C(g)
+          <input type="number" name="targetCarbs" step="1" min="0" inputmode="numeric">
+        </label>
+      </div>
+      <button type="button" id="goal-autofill" class="btn-secondary">体重から自動計算</button>
+      <button type="submit" class="btn-primary">保存する</button>
+    </form>
+
+    <div class="card">
+      <div class="card-title">進捗</div>
+      <div id="goal-progress"></div>
+    </div>
+  </section>
+
+</main>
+
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-target="home">
+    <span class="nav-icon">🏠</span><span>ホーム</span>
+  </button>
+  <button class="nav-btn" data-target="workout">
+    <span class="nav-icon">🏋️</span><span>筋トレ</span>
+  </button>
+  <button class="nav-btn" data-target="meal">
+    <span class="nav-icon">🍚</span><span>食事</span>
+  </button>
+  <button class="nav-btn" data-target="weight">
+    <span class="nav-icon">⚖️</span><span>体重</span>
+  </button>
+  <button class="nav-btn" data-target="goal">
+    <span class="nav-icon">🎯</span><span>目標</span>
+  </button>
+</nav>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
