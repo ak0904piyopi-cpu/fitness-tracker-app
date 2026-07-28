@@ -167,6 +167,18 @@ html, body {
   color: #06281c;
 }
 
+.chip-grid .chip.chip-removable {
+  background: var(--card-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.chip-grid .chip.chip-add {
+  background: transparent;
+  border: 1px dashed var(--primary);
+  color: var(--primary);
+}
+
 .form input,
 .form select {
   display: block;

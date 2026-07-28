@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   weights: 'ftrack_weights',
   goal: 'ftrack_goal',
   settings: 'ftrack_settings',
+  exerciseLibrary: 'ftrack_exercise_library',
 };
 
 function load(key, fallback) {
@@ -41,6 +42,7 @@ let state = {
     geminiApiKey: '',
     geminiModel: 'gemini-2.5-flash',
   }),
+  exerciseLibrary: load(STORAGE_KEYS.exerciseLibrary, null) || defaultExerciseLibrary(),
 };
 
 function persist(part) {
@@ -325,31 +327,44 @@ function escapeHtml(str) {
 }
 
 /* ================= WORKOUT ================= */
-const EXERCISE_LIBRARY = {
-  '胸': ['ベンチプレス', 'インクラインベンチプレス', 'ダンベルプレス', 'チェストプレス(マシン)', 'ペックフライ(マシン)', 'ダンベルフライ', 'ケーブルクロスオーバー', 'ディップス'],
-  '背中': ['ラットプルダウン(マシン)', 'シーテッドロウ(マシン)', 'ベントオーバーロウ', 'ワンハンドダンベルロウ', 'デッドリフト', '懸垂(チンニング)', 'Tバーロウ'],
-  '脚': ['スクワット', 'レッグプレス(マシン)', 'レッグエクステンション(マシン)', 'レッグカール(マシン)', 'ランジ', 'カーフレイズ', 'ヒップスラスト', 'ブルガリアンスクワット'],
-  '肩': ['ショルダープレス', 'サイドレイズ', 'リアレイズ', 'アップライトロウ', 'シュラッグ'],
-  '腕': ['アームカール', 'ハンマーカール', 'トライセプスプレスダウン(ケーブル)', 'ライイングトライセプスエクステンション', 'プリーチャーカール(マシン)'],
-  '腹': ['クランチ(マシン)', 'レッグレイズ', 'アブローラー', 'プランク', 'ロシアンツイスト'],
-};
+function defaultExerciseLibrary() {
+  return {
+    '胸': ['ベンチプレス', 'インクラインベンチプレス', 'ダンベルプレス', 'チェストプレス(マシン)', 'ペックフライ(マシン)', 'ダンベルフライ', 'ケーブルクロスオーバー', 'ディップス'],
+    '背中': ['ラットプルダウン(マシン)', 'シーテッドロウ(マシン)', 'ベントオーバーロウ', 'ワンハンドダンベルロウ', 'デッドリフト', '懸垂(チンニング)', 'Tバーロウ'],
+    '脚': ['スクワット', 'レッグプレス(マシン)', 'レッグエクステンション(マシン)', 'レッグカール(マシン)', 'ランジ', 'カーフレイズ', 'ヒップスラスト', 'ブルガリアンスクワット'],
+    '肩': ['ショルダープレス', 'サイドレイズ', 'リアレイズ', 'アップライトロウ', 'シュラッグ'],
+    '腕': ['アームカール', 'ハンマーカール', 'トライセプスプレスダウン(ケーブル)', 'ライイングトライセプスエクステンション', 'プリーチャーカール(マシン)'],
+    '腹': ['クランチ(マシン)', 'レッグレイズ', 'アブローラー', 'プランク', 'ロシアンツイスト'],
+  };
+}
 
-let selectedExerciseCategory = Object.keys(EXERCISE_LIBRARY)[0];
+let selectedExerciseCategory = null;
 let selectedExerciseName = null;
+let exerciseEditMode = false;
 
 function renderExerciseCategoryChips() {
+  if (!selectedExerciseCategory || !(selectedExerciseCategory in state.exerciseLibrary)) {
+    selectedExerciseCategory = Object.keys(state.exerciseLibrary)[0];
+  }
   const el = document.getElementById('exercise-category-chips');
-  el.innerHTML = Object.keys(EXERCISE_LIBRARY).map(cat =>
+  el.innerHTML = Object.keys(state.exerciseLibrary).map(cat =>
     `<button type="button" class="chip ${cat === selectedExerciseCategory ? 'active' : ''}" data-category="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`
   ).join('');
 }
 
 function renderExerciseItemChips() {
   const el = document.getElementById('exercise-item-chips');
-  const items = EXERCISE_LIBRARY[selectedExerciseCategory] || [];
-  el.innerHTML = items.map(name =>
-    `<button type="button" class="chip ${name === selectedExerciseName ? 'selected' : ''}" data-exercise-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`
-  ).join('');
+  const items = state.exerciseLibrary[selectedExerciseCategory] || [];
+  let html = items.map(name => {
+    if (exerciseEditMode) {
+      return `<button type="button" class="chip chip-removable" data-remove-exercise="${escapeHtml(name)}">${escapeHtml(name)} ✕</button>`;
+    }
+    return `<button type="button" class="chip ${name === selectedExerciseName ? 'selected' : ''}" data-exercise-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+  }).join('');
+  if (exerciseEditMode) {
+    html += `<button type="button" class="chip chip-add" id="exercise-add-chip">＋ 追加</button>`;
+  }
+  el.innerHTML = html;
 }
 
 function renderWorkout() {
@@ -368,6 +383,8 @@ function renderWorkout() {
     select.value = prevSelected;
   }
 
+  exerciseEditMode = false;
+  document.getElementById('exercise-edit-toggle').textContent = '編集';
   renderExerciseCategoryChips();
   renderExerciseItemChips();
   renderWorkoutProgressChart();
@@ -743,7 +760,30 @@ function initForms() {
     renderExerciseItemChips();
   });
 
+  document.getElementById('exercise-edit-toggle').addEventListener('click', () => {
+    exerciseEditMode = !exerciseEditMode;
+    document.getElementById('exercise-edit-toggle').textContent = exerciseEditMode ? '完了' : '編集';
+    renderExerciseItemChips();
+  });
+
   document.getElementById('exercise-item-chips').addEventListener('click', e => {
+    const removeName = e.target.getAttribute('data-remove-exercise');
+    if (removeName) {
+      state.exerciseLibrary[selectedExerciseCategory] = state.exerciseLibrary[selectedExerciseCategory].filter(n => n !== removeName);
+      persist('exerciseLibrary');
+      renderExerciseItemChips();
+      return;
+    }
+    if (e.target.id === 'exercise-add-chip') {
+      const input = prompt('追加する種目名を入力してください');
+      const name = input ? input.trim() : '';
+      if (name && !state.exerciseLibrary[selectedExerciseCategory].includes(name)) {
+        state.exerciseLibrary[selectedExerciseCategory].push(name);
+        persist('exerciseLibrary');
+        renderExerciseItemChips();
+      }
+      return;
+    }
     const name = e.target.getAttribute('data-exercise-name');
     if (!name) return;
     selectedExerciseName = name;
