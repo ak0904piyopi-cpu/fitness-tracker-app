@@ -114,8 +114,13 @@ function renderTab(name) {
 function drawLineChart(canvas, points, opts = {}) {
   const ctx = canvas.getContext('2d');
   const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 300;
-  const cssHeight = canvas.height || 160;
+  // Read the intended display height from data-h (fixed at markup time), never from
+  // canvas.height itself — that property is reflected/mutated below for bitmap scaling,
+  // so reusing it as the source would compound on every re-render (dpr× per call).
+  const cssHeight = Number(canvas.dataset.h) || 160;
   const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = cssWidth + 'px';
+  canvas.style.height = cssHeight + 'px';
   canvas.width = cssWidth * dpr;
   canvas.height = cssHeight * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -131,6 +136,15 @@ function drawLineChart(canvas, points, opts = {}) {
     ctx.font = '13px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('データがありません', cssWidth / 2, cssHeight / 2);
+    return;
+  }
+
+  if (points.length === 1) {
+    ctx.fillStyle = textColor;
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${points[0].label}: ${fmtNum(points[0].value, 1)}`, cssWidth / 2, cssHeight / 2 - 8);
+    ctx.fillText('記録が増えると推移グラフが表示されます', cssWidth / 2, cssHeight / 2 + 12);
     return;
   }
 
