@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   meals: 'ftrack_meals',
   weights: 'ftrack_weights',
   goal: 'ftrack_goal',
+  settings: 'ftrack_settings',
 };
 
 function load(key, fallback) {
@@ -35,6 +36,10 @@ let state = {
     targetProtein: null,
     targetFat: null,
     targetCarbs: null,
+  }),
+  settings: load(STORAGE_KEYS.settings, {
+    geminiApiKey: '',
+    geminiModel: 'gemini-2.5-flash',
   }),
 };
 
@@ -438,6 +443,119 @@ function renderMealHistory() {
   el.innerHTML = html;
 }
 
+/* ================= PHOTO ANALYSIS (Gemini) ================= */
+function resizeImageToBase64(file, maxDim = 1024) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) { height = Math.round((height * maxDim) / width); width = maxDim; }
+        else { width = Math.round((width * maxDim) / height); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.82).split(',')[1]);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('IMAGE_LOAD_FAILED'));
+    };
+    img.src = url;
+  });
+}
+
+async function analyzeFoodPhoto(base64Data) {
+  const { geminiApiKey, geminiModel } = state.settings;
+  if (!geminiApiKey) throw new Error('NO_API_KEY');
+  const model = geminiModel || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiApiKey)}`;
+  const prompt = 'あなたは栄養士です。添付された食事の写真を見て、料理名（日本語、短く）と、写っている分量から推定した栄養価を返してください。次のJSON形式のみで出力し、説明文は付けないでください。数値は数字のみ（単位なし）。{"name": string, "calories": number, "protein_g": number, "fat_g": number, "carbs_g": number}';
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
+        ],
+      }],
+      generationConfig: { responseMimeType: 'application/json' },
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    if (res.status === 400 || res.status === 403) throw new Error('INVALID_KEY');
+    throw new Error('API_ERROR: ' + res.status + ' ' + errBody.slice(0, 200));
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('EMPTY_RESPONSE');
+  return JSON.parse(text);
+}
+
+async function handlePhotoSelected(file) {
+  const statusEl = document.getElementById('photo-analyze-status');
+  const btn = document.getElementById('photo-analyze-btn');
+
+  if (!state.settings.geminiApiKey) {
+    toast('先に設定画面でGemini APIキーを入力してください');
+    openSettingsModal();
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = '解析中…';
+  statusEl.classList.remove('hidden');
+  statusEl.classList.add('loading');
+
+  try {
+    const base64 = await resizeImageToBase64(file);
+    const result = await analyzeFoodPhoto(base64);
+
+    const form = document.getElementById('meal-form');
+    form.date.value = form.date.value || todayStr();
+    form.foodName.value = result.name ?? '';
+    form.calories.value = result.calories ?? '';
+    form.protein.value = result.protein_g ?? 0;
+    form.fat.value = result.fat_g ?? 0;
+    form.carbs.value = result.carbs_g ?? 0;
+
+    statusEl.textContent = '解析完了。内容を確認して「記録する」を押してください';
+    toast('AIが推定しました');
+  } catch (err) {
+    console.error(err);
+    if (err.message === 'INVALID_KEY') {
+      statusEl.textContent = 'APIキーが正しくないか無効です。設定を確認してください。';
+    } else if (err.message === 'EMPTY_RESPONSE') {
+      statusEl.textContent = '解析結果を取得できませんでした。もう一度お試しください。';
+    } else {
+      statusEl.textContent = '解析に失敗しました（通信エラーの可能性があります）';
+    }
+  } finally {
+    statusEl.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+/* ================= SETTINGS ================= */
+function openSettingsModal() {
+  document.getElementById('gemini-api-key-input').value = state.settings.geminiApiKey || '';
+  document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+function closeSettingsModal() {
+  document.getElementById('settings-modal').classList.add('hidden');
+}
+
 /* ================= WEIGHT ================= */
 function renderWeight() {
   document.querySelector('#weight-form [name="date"]').value =
@@ -544,6 +662,28 @@ function initNav() {
   });
 }
 
+function initSettings() {
+  document.getElementById('settings-btn').addEventListener('click', openSettingsModal);
+  document.getElementById('settings-close-btn').addEventListener('click', closeSettingsModal);
+  document.getElementById('settings-modal').addEventListener('click', e => {
+    if (e.target.id === 'settings-modal') closeSettingsModal();
+  });
+  document.getElementById('toggle-key-visibility').addEventListener('click', () => {
+    const input = document.getElementById('gemini-api-key-input');
+    const btn = document.getElementById('toggle-key-visibility');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? '隠す' : '表示';
+  });
+  document.getElementById('settings-form').addEventListener('submit', e => {
+    e.preventDefault();
+    state.settings.geminiApiKey = document.getElementById('gemini-api-key-input').value.trim();
+    persist('settings');
+    toast('設定を保存しました');
+    closeSettingsModal();
+  });
+}
+
 function initForms() {
   document.getElementById('workout-form').addEventListener('submit', e => {
     e.preventDefault();
@@ -581,14 +721,14 @@ function initForms() {
     state.meals.push({
       id: uid(),
       date: f.date.value,
-      name: f.name.value.trim(),
+      name: f.foodName.value.trim(),
       calories: Number(f.calories.value) || 0,
       protein: Number(f.protein.value) || 0,
       fat: Number(f.fat.value) || 0,
       carbs: Number(f.carbs.value) || 0,
     });
     persist('meals');
-    f.name.value = '';
+    f.foodName.value = '';
     f.calories.value = '';
     f.protein.value = '0';
     f.fat.value = '0';
@@ -598,6 +738,16 @@ function initForms() {
   });
 
   document.getElementById('meal-history-date').addEventListener('change', renderMealHistory);
+
+  document.getElementById('photo-analyze-btn').addEventListener('click', () => {
+    document.getElementById('photo-input').click();
+  });
+
+  document.getElementById('photo-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) handlePhotoSelected(file);
+  });
 
   document.getElementById('meal-history').addEventListener('click', e => {
     const id = e.target.getAttribute('data-del-meal');
@@ -661,6 +811,7 @@ function init() {
   updateTopbarDate();
   initNav();
   initForms();
+  initSettings();
   showTab('home');
 
   if ('serviceWorker' in navigator) {

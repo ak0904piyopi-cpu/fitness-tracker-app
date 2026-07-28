@@ -17,7 +17,10 @@
 
 <header class="topbar">
   <h1 id="topbar-title">ホーム</h1>
-  <div class="topbar-date" id="topbar-date"></div>
+  <div class="topbar-right">
+    <div class="topbar-date" id="topbar-date"></div>
+    <button id="settings-btn" class="icon-btn" aria-label="設定">⚙️</button>
+  </div>
 </header>
 
 <main id="app">
@@ -85,13 +88,21 @@
 
   <!-- 食事 -->
   <section class="tab-panel hidden" id="panel-meal" data-panel="meal">
+    <div class="card">
+      <div class="card-title">写真から記録</div>
+      <button type="button" id="photo-analyze-btn" class="btn-primary">📷 写真を撮って解析する</button>
+      <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden">
+      <div id="photo-analyze-status" class="muted small hidden"></div>
+      <div class="muted small" style="margin-top:6px">AI(Gemini)による推定値です。内容を確認してから記録してください。</div>
+    </div>
+
     <form class="card form" id="meal-form">
       <div class="card-title">食事を記録</div>
       <label>日付
         <input type="date" name="date" required>
       </label>
       <label>食品名・メニュー
-        <input type="text" name="name" placeholder="例: 鶏むね肉サラダ" required>
+        <input type="text" name="foodName" placeholder="例: 鶏むね肉サラダ" required>
       </label>
       <div class="row2">
         <label>カロリー(kcal)
@@ -222,6 +233,25 @@
 </nav>
 
 <div id="toast" class="toast hidden"></div>
+
+<div id="settings-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="card-title">設定</div>
+    <form id="settings-form" class="form">
+      <label>Gemini APIキー
+        <div class="input-with-btn">
+          <input type="password" name="geminiApiKey" id="gemini-api-key-input" placeholder="AIza...">
+          <button type="button" id="toggle-key-visibility" class="btn-inline">表示</button>
+        </div>
+      </label>
+      <div class="muted small" style="margin-bottom:12px">
+        Google AI Studio (aistudio.google.com/apikey) で無料発行できます。キーはこの端末内にのみ保存され、写真解析時にGoogleへ直接送信されます。
+      </div>
+      <button type="submit" class="btn-primary">保存</button>
+      <button type="button" id="settings-close-btn" class="btn-secondary" style="margin-top:8px">閉じる</button>
+    </form>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>
