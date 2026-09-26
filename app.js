@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   goal: 'ftrack_goal',
   settings: 'ftrack_settings',
   exerciseLibrary: 'ftrack_exercise_library',
+  routines: 'ftrack_routines',
 };
 
 function load(key, fallback) {
@@ -43,6 +44,7 @@ let state = {
     geminiModel: '',
   }),
   exerciseLibrary: load(STORAGE_KEYS.exerciseLibrary, null) || defaultExerciseLibrary(),
+  routines: load(STORAGE_KEYS.routines, null) || defaultRoutines(),
 };
 
 function persist(part) {
@@ -79,19 +81,26 @@ function fmtNum(n, digits = 1) {
   return rounded.toString();
 }
 
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, opts = {}) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.remove('hidden');
+  el.classList.toggle('celebrate', !!opts.celebrate);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add('hidden'), 1600);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), opts.celebrate ? 2600 : 1600);
 }
 
 /* ---------- Navigation ---------- */
 const TAB_TITLES = { home: 'ホーム', workout: '筋トレ記録', meal: '食事記録', weight: '体重記録', goal: '目標設定' };
+let currentTab = 'home';
 
 function showTab(name) {
+  currentTab = name;
   document.querySelectorAll('.tab-panel').forEach(p => {
     p.classList.toggle('hidden', p.dataset.panel !== name);
   });
@@ -99,6 +108,7 @@ function showTab(name) {
     b.classList.toggle('active', b.dataset.target === name);
   });
   document.getElementById('topbar-title').textContent = TAB_TITLES[name];
+  document.getElementById('fab-photo').classList.toggle('hidden', !(name === 'home' || name === 'meal'));
   renderTab(name);
 }
 
@@ -127,9 +137,9 @@ function drawLineChart(canvas, points, opts = {}) {
   ctx.clearRect(0, 0, cssWidth, cssHeight);
 
   const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const gridColor = isDark ? '#2a2e37' : '#e5e7eb';
-  const textColor = isDark ? '#9aa0aa' : '#6b7280';
-  const lineColor = opts.color || (isDark ? '#3b82f6' : '#2563eb');
+  const gridColor = isDark ? '#2c2836' : '#efe4d8';
+  const textColor = isDark ? '#9c93ac' : '#8b8496';
+  const lineColor = opts.color || (isDark ? '#ff7a50' : '#ff5a36');
 
   if (!points || points.length === 0) {
     ctx.fillStyle = textColor;
@@ -185,7 +195,7 @@ function drawLineChart(canvas, points, opts = {}) {
   if (opts.targetValue !== undefined && opts.targetValue !== null && !isNaN(opts.targetValue)) {
     const ty = yFor(opts.targetValue);
     ctx.save();
-    ctx.strokeStyle = '#f59e0b';
+    ctx.strokeStyle = '#f5b93b';
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(padL, ty);
@@ -196,7 +206,7 @@ function drawLineChart(canvas, points, opts = {}) {
 
   // line
   ctx.strokeStyle = lineColor;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
   points.forEach((p, i) => {
     const x = xFor(i), y = yFor(p.value);
@@ -209,7 +219,7 @@ function drawLineChart(canvas, points, opts = {}) {
   points.forEach((p, i) => {
     const x = xFor(i), y = yFor(p.value);
     ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
     ctx.fill();
   });
 
@@ -224,7 +234,26 @@ function drawLineChart(canvas, points, opts = {}) {
 }
 
 /* ================= HOME ================= */
+function computeWorkoutStreak() {
+  const dates = new Set(state.workouts.map(w => w.date));
+  const startOffset = dates.has(todayStr()) ? 0 : (dates.has(daysAgoStr(1)) ? 1 : null);
+  if (startOffset === null) return 0;
+  let streak = 0;
+  let n = startOffset;
+  while (dates.has(daysAgoStr(n))) { streak++; n++; }
+  return streak;
+}
+
 function renderHome() {
+  const streak = computeWorkoutStreak();
+  const streakEl = document.getElementById('home-streak-banner');
+  if (streak >= 2) {
+    streakEl.textContent = `🔥 ${streak}日連続記録中！`;
+    streakEl.classList.remove('hidden');
+  } else {
+    streakEl.classList.add('hidden');
+  }
+
   const g = state.goal;
   const phaseCard = document.getElementById('home-phase-card');
   const latestWeight = getLatestWeight();
@@ -336,10 +365,6 @@ function getLatestWeight() {
   return Number(sorted[sorted.length - 1].weight);
 }
 
-function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 /* ================= WORKOUT ================= */
 function defaultExerciseLibrary() {
   return {
@@ -352,9 +377,88 @@ function defaultExerciseLibrary() {
   };
 }
 
+const EXERCISE_INFO = {
+  'ベンチプレス': '仰向けに寝てバーベルを胸の上まで下ろし、まっすぐ押し上げる',
+  'インクラインベンチプレス': '上体を斜めに傾けたベンチで行うベンチプレス。胸の上部に効く',
+  'ダンベルプレス': '仰向けでダンベルを両手に持ち、胸の横から真上に押し上げる',
+  'チェストプレス(マシン)': '座ったままレバーを前方に押し出すマシン種目',
+  'ペックフライ(マシン)': '両腕を胸の前で閉じるように動かすマシン種目',
+  'ダンベルフライ': '仰向けでダンベルを持ち、弧を描くように腕を開閉する',
+  'ケーブルクロスオーバー': '左右のケーブルを胸の前で交差させるように引き寄せる',
+  'ディップス': '平行棒に腕を伸ばして体を支え、肘を曲げて体を沈める',
+  'ラットプルダウン(マシン)': '座ってバーを頭上から胸の前まで引き下ろす',
+  'シーテッドロウ(マシン)': '座って前方のハンドルを体に引き寄せる',
+  'ベントオーバーロウ': '上体を前傾させてバーベルを腹に向かって引き上げる',
+  'ワンハンドダンベルロウ': '片手・片膝をベンチにつき、ダンベルを脇腹に引き上げる',
+  'デッドリフト': '床のバーベルを、背中をまっすぐ保ったまま立ち上がって持ち上げる',
+  '懸垂(チンニング)': 'バーにぶら下がり、顎がバーを超えるまで体を引き上げる',
+  'Tバーロウ': '体を前傾させ、Tバーのハンドルを胸に向かって引く',
+  'スクワット': 'バーベルを担ぎ、股関節と膝を曲げてしゃがみ込んでから立ち上がる',
+  'レッグプレス(マシン)': '座った姿勢でフットプレートを脚で押し出す',
+  'レッグエクステンション(マシン)': '座って膝を伸ばし、足を前方に蹴り上げる',
+  'レッグカール(マシン)': 'うつ伏せや座位で膝を曲げ、かかとをお尻に近づける',
+  'ランジ': '片足を大きく前に踏み出し、膝を曲げて体を沈める',
+  'カーフレイズ': 'かかとを上げ下げしてふくらはぎを鍛える',
+  'ヒップスラスト': '肩をベンチにつけ、バーベルを腰にのせて腰を突き上げる',
+  'ブルガリアンスクワット': '後ろ足を台に乗せ、片足でしゃがみ込む',
+  'ショルダープレス': 'ダンベルやバーベルを肩の高さから頭上に押し上げる',
+  'サイドレイズ': '両腕にダンベルを持ち、体の横に肩の高さまで上げる',
+  'リアレイズ': '前傾姿勢で両腕を体の後ろ側に持ち上げる',
+  'アップライトロウ': 'バーベルやダンベルを体の前面で顎の下まで引き上げる',
+  'シュラッグ': 'ダンベルやバーベルを持ち、肩をすくめるように上げ下げする',
+  'アームカール': 'ダンベルやバーベルを持ち、肘を曲げて持ち上げる（力こぶ）',
+  'ハンマーカール': '手のひらを内側に向けたままダンベルを持ち上げる',
+  'トライセプスプレスダウン(ケーブル)': 'ケーブルバーを胸の高さから下に押し下げる',
+  'ライイングトライセプスエクステンション': '仰向けでバーベルを額の上まで下ろし、肘を伸ばして戻す',
+  'プリーチャーカール(マシン)': '台に腕を固定した状態でカールを行う',
+  'クランチ(マシン)': '座ってパッドを押し込むように上体を丸める',
+  'レッグレイズ': '仰向けで脚をまっすぐ伸ばしたまま持ち上げる',
+  'アブローラー': '膝立ちでローラーを前方に転がし、腹筋で引き戻す',
+  'プランク': '肘とつま先で体を一直線に支え、姿勢をキープする',
+  'ロシアンツイスト': '座った姿勢で上体をひねり、左右に体重を移動させる',
+};
+
+function imageSearchUrl(name) {
+  return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(name + ' 筋トレ フォーム')}`;
+}
+
+function defaultRoutines() {
+  const lib = defaultExerciseLibrary();
+  return Object.keys(lib).map(cat => ({ id: uid(), name: `${cat}の日`, exercises: [...lib[cat]] }));
+}
+
+function estimate1RM(weight, reps) {
+  if (reps <= 1) return weight;
+  return weight * (1 + reps / 30);
+}
+
+function getPB(exerciseName) {
+  const records = state.workouts.filter(w => w.exercise === exerciseName);
+  if (records.length === 0) return null;
+  let maxWeight = -Infinity, maxWeightReps = 0, maxWeightDate = null;
+  let maxEst1RM = -Infinity, maxEst1RMDate = null;
+  records.forEach(r => {
+    const w = Number(r.weight), reps = Number(r.reps);
+    if (w > maxWeight) { maxWeight = w; maxWeightReps = reps; maxWeightDate = r.date; }
+    const e1 = estimate1RM(w, reps);
+    if (e1 > maxEst1RM) { maxEst1RM = e1; maxEst1RMDate = r.date; }
+  });
+  return { maxWeight, maxWeightReps, maxWeightDate, maxEst1RM, maxEst1RMDate };
+}
+
+function getLatestRecord(exerciseName) {
+  const records = state.workouts.filter(w => w.exercise === exerciseName);
+  if (records.length === 0) return null;
+  return [...records].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).pop();
+}
+
 let selectedExerciseCategory = null;
 let selectedExerciseName = null;
 let exerciseEditMode = false;
+let selectedRoutineId = null;
+let routineEditMode = false;
+let editingRoutineId = null;
+let routineDraftExercises = new Set();
 
 function renderExerciseCategoryChips() {
   if (!selectedExerciseCategory || !(selectedExerciseCategory in state.exerciseLibrary)) {
@@ -368,17 +472,97 @@ function renderExerciseCategoryChips() {
 
 function renderExerciseItemChips() {
   const el = document.getElementById('exercise-item-chips');
-  const items = state.exerciseLibrary[selectedExerciseCategory] || [];
+  let items;
+  if (selectedRoutineId) {
+    const r = state.routines.find(x => x.id === selectedRoutineId);
+    items = r ? r.exercises : [];
+  } else {
+    items = state.exerciseLibrary[selectedExerciseCategory] || [];
+  }
   let html = items.map(name => {
-    if (exerciseEditMode) {
+    if (exerciseEditMode && !selectedRoutineId) {
       return `<button type="button" class="chip chip-removable" data-remove-exercise="${escapeHtml(name)}">${escapeHtml(name)} ✕</button>`;
     }
     return `<button type="button" class="chip ${name === selectedExerciseName ? 'selected' : ''}" data-exercise-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
   }).join('');
-  if (exerciseEditMode) {
+  if (exerciseEditMode && !selectedRoutineId) {
     html += `<button type="button" class="chip chip-add" id="exercise-add-chip">＋ 追加</button>`;
   }
+  el.innerHTML = html || '<div class="muted small">種目がありません</div>';
+}
+
+function updateExerciseFilterVisibility() {
+  const catRow = document.getElementById('exercise-category-chips');
+  const editToggle = document.getElementById('exercise-edit-toggle');
+  const active = !!selectedRoutineId;
+  catRow.classList.toggle('hidden', active);
+  editToggle.classList.toggle('hidden', active);
+}
+
+function renderRoutineChips() {
+  const el = document.getElementById('routine-chips');
+  let html = `<button type="button" class="chip ${selectedRoutineId === null ? 'active' : ''}" data-routine="">全種目</button>`;
+  html += state.routines.map(r => {
+    if (routineEditMode) {
+      return `<span class="chip chip-removable" data-edit-routine="${r.id}">${escapeHtml(r.name)}<button type="button" class="chip-x" data-remove-routine="${r.id}">✕</button></span>`;
+    }
+    return `<button type="button" class="chip ${r.id === selectedRoutineId ? 'active' : ''}" data-routine="${r.id}">${escapeHtml(r.name)}</button>`;
+  }).join('');
+  if (routineEditMode) {
+    html += `<button type="button" class="chip chip-add" id="routine-add-chip">＋ 新規</button>`;
+  }
   el.innerHTML = html;
+}
+
+function renderRoutineProgress() {
+  const el = document.getElementById('routine-progress');
+  if (!selectedRoutineId) { el.classList.add('hidden'); return; }
+  const r = state.routines.find(x => x.id === selectedRoutineId);
+  if (!r) { el.classList.add('hidden'); return; }
+  const today = todayStr();
+  const todayNames = new Set(state.workouts.filter(w => w.date === today).map(w => w.exercise));
+  const done = r.exercises.filter(n => todayNames.has(n)).length;
+  el.textContent = `今日 ${done}/${r.exercises.length} 種目完了`;
+  el.classList.remove('hidden');
+}
+
+function renderWorkoutPB() {
+  const select = document.getElementById('workout-exercise-select');
+  const exercise = select.value;
+  const el = document.getElementById('workout-pb-info');
+  const pb = exercise ? getPB(exercise) : null;
+  if (!pb) { el.classList.add('hidden'); return; }
+  el.textContent = `🏆 自己ベスト ${fmtNum(pb.maxWeight, 1)}kg × ${pb.maxWeightReps}回（推定1RM ${fmtNum(pb.maxEst1RM, 1)}kg）・${formatLabel(pb.maxWeightDate)}`;
+  el.classList.remove('hidden');
+}
+
+function fillPrevValues(name) {
+  const hintEl = document.getElementById('workout-prev-hint');
+  if (!name) { hintEl.classList.add('hidden'); hintEl.textContent = ''; return; }
+  const latest = getLatestRecord(name);
+  const form = document.getElementById('workout-form');
+  if (latest) {
+    form.weight.value = latest.weight;
+    form.reps.value = latest.reps;
+    form.sets.value = latest.sets;
+    hintEl.textContent = `前回: ${fmtNum(latest.weight, 1)}kg × ${latest.reps}回 × ${latest.sets}セット（${formatLabel(latest.date)}）`;
+    hintEl.classList.remove('hidden');
+  } else {
+    hintEl.textContent = '';
+    hintEl.classList.add('hidden');
+  }
+}
+
+function renderExerciseInfo() {
+  const el = document.getElementById('exercise-info');
+  if (!selectedExerciseName) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const desc = EXERCISE_INFO[selectedExerciseName];
+  el.innerHTML = `
+    <div class="exercise-info-name">${escapeHtml(selectedExerciseName)}</div>
+    ${desc ? `<div class="exercise-info-desc">${escapeHtml(desc)}</div>` : ''}
+    <a class="exercise-info-link" href="${imageSearchUrl(selectedExerciseName)}" target="_blank" rel="noopener">🔍 画像で見る</a>
+  `;
+  el.classList.remove('hidden');
 }
 
 function renderWorkout() {
@@ -399,9 +583,17 @@ function renderWorkout() {
 
   exerciseEditMode = false;
   document.getElementById('exercise-edit-toggle').textContent = '編集';
+  routineEditMode = false;
+  document.getElementById('routine-edit-toggle').textContent = '編集';
+
+  renderRoutineChips();
+  renderRoutineProgress();
+  updateExerciseFilterVisibility();
   renderExerciseCategoryChips();
   renderExerciseItemChips();
+  renderExerciseInfo();
   renderWorkoutProgressChart();
+  renderWorkoutPB();
   renderWorkoutHistory();
 }
 
@@ -453,6 +645,30 @@ function renderWorkoutHistory() {
       </div>`;
   });
   el.innerHTML = html;
+}
+
+/* ================= ROUTINE MODAL ================= */
+function openRoutineModal(routine) {
+  editingRoutineId = routine ? routine.id : null;
+  routineDraftExercises = new Set(routine ? routine.exercises : []);
+  document.getElementById('routine-modal-title').textContent = routine ? 'ルーティンを編集' : 'ルーティンを作成';
+  document.getElementById('routine-name-input').value = routine ? routine.name : '';
+  renderRoutinePicker();
+  document.getElementById('routine-modal').classList.remove('hidden');
+}
+
+function closeRoutineModal() {
+  document.getElementById('routine-modal').classList.add('hidden');
+}
+
+function renderRoutinePicker() {
+  const el = document.getElementById('routine-exercise-picker');
+  el.innerHTML = Object.entries(state.exerciseLibrary).map(([cat, names]) => `
+    <div class="field-label" style="margin-top:10px">${escapeHtml(cat)}</div>
+    <div class="chip-grid">
+      ${names.map(n => `<button type="button" class="chip ${routineDraftExercises.has(n) ? 'selected' : ''}" data-pick-exercise="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join('')}
+    </div>
+  `).join('');
 }
 
 /* ================= MEAL ================= */
@@ -626,9 +842,24 @@ async function analyzeFoodPhoto(base64Data) {
   }
 }
 
+let pendingMealResult = null;
+
+function openPhotoResultModal(result) {
+  pendingMealResult = result;
+  document.getElementById('photo-result-name').textContent = result.name || '(名称不明)';
+  document.getElementById('photo-result-cal').textContent = fmtNum(result.calories, 0);
+  document.getElementById('photo-result-p').textContent = fmtNum(result.protein_g, 1);
+  document.getElementById('photo-result-f').textContent = fmtNum(result.fat_g, 1);
+  document.getElementById('photo-result-c').textContent = fmtNum(result.carbs_g, 1);
+  document.getElementById('photo-result-modal').classList.remove('hidden');
+}
+
+function closePhotoResultModal() {
+  document.getElementById('photo-result-modal').classList.add('hidden');
+}
+
 async function handlePhotoSelected(file) {
   const statusEl = document.getElementById('photo-analyze-status');
-  const btn = document.getElementById('photo-analyze-btn');
 
   if (!state.settings.geminiApiKey) {
     toast('先に設定画面でGemini APIキーを入力してください');
@@ -636,7 +867,6 @@ async function handlePhotoSelected(file) {
     return;
   }
 
-  btn.disabled = true;
   statusEl.textContent = '解析中…';
   statusEl.classList.remove('hidden');
   statusEl.classList.add('loading');
@@ -644,38 +874,31 @@ async function handlePhotoSelected(file) {
   try {
     const base64 = await resizeImageToBase64(file);
     const result = await analyzeFoodPhoto(base64);
-
-    const form = document.getElementById('meal-form');
-    form.date.value = form.date.value || todayStr();
-    form.foodName.value = result.name ?? '';
-    form.calories.value = result.calories ?? '';
-    form.protein.value = result.protein_g ?? 0;
-    form.fat.value = result.fat_g ?? 0;
-    form.carbs.value = result.carbs_g ?? 0;
-
-    statusEl.textContent = '解析完了。内容を確認して「記録する」を押してください';
-    toast('AIが推定しました');
+    statusEl.classList.add('hidden');
+    statusEl.classList.remove('loading');
+    openPhotoResultModal(result);
   } catch (err) {
     console.error(err);
     const msg = err && err.message ? err.message : String(err);
+    let friendly;
     if (msg === 'INVALID_KEY') {
-      statusEl.textContent = 'APIキーが正しくないか無効です。設定を確認してください。';
+      friendly = 'APIキーが正しくないか無効です。設定を確認してください。';
     } else if (msg === 'RATE_LIMIT') {
-      statusEl.textContent = '無料枠の利用上限に達した可能性があります。しばらく待って再度お試しください。';
+      friendly = '無料枠の利用上限に達した可能性があります。しばらく待って再度お試しください。';
     } else if (msg.startsWith('BLOCKED:')) {
-      statusEl.textContent = 'この写真はAIの安全フィルターによりブロックされました。別の写真でお試しください。';
+      friendly = 'この写真はAIの安全フィルターによりブロックされました。別の写真でお試しください。';
     } else if (msg.startsWith('PARSE_ERROR') || msg.startsWith('EMPTY_RESPONSE')) {
-      statusEl.textContent = 'AIの応答を解析できませんでした。もう一度お試しください。（詳細: ' + msg.slice(0, 120) + '）';
+      friendly = 'AIの応答を解析できませんでした。もう一度お試しください。';
     } else if (msg === 'NO_USABLE_MODEL' || msg.startsWith('MODEL_LIST_FAILED')) {
-      statusEl.textContent = '利用できるAIモデルが見つかりませんでした。しばらくしてから再度お試しください。（詳細: ' + msg.slice(0, 120) + '）';
+      friendly = '利用できるAIモデルが見つかりませんでした。しばらくしてから再度お試しください。';
     } else if (err instanceof TypeError) {
-      statusEl.textContent = 'ネットワークに接続できませんでした。通信状況を確認してください。';
+      friendly = 'ネットワークに接続できませんでした。通信状況を確認してください。';
     } else {
-      statusEl.textContent = '解析に失敗しました（詳細: ' + msg.slice(0, 150) + '）';
+      friendly = '解析に失敗しました（詳細: ' + msg.slice(0, 120) + '）';
     }
-  } finally {
+    statusEl.textContent = friendly;
     statusEl.classList.remove('loading');
-    btn.disabled = false;
+    toast(friendly);
   }
 }
 
@@ -817,25 +1040,103 @@ function initSettings() {
   });
 }
 
+function initRoutineModal() {
+  document.getElementById('routine-modal-close').addEventListener('click', closeRoutineModal);
+  document.getElementById('routine-modal').addEventListener('click', e => {
+    if (e.target.id === 'routine-modal') closeRoutineModal();
+  });
+  document.getElementById('routine-exercise-picker').addEventListener('click', e => {
+    const name = e.target.getAttribute('data-pick-exercise');
+    if (!name) return;
+    if (routineDraftExercises.has(name)) routineDraftExercises.delete(name);
+    else routineDraftExercises.add(name);
+    renderRoutinePicker();
+  });
+  document.getElementById('routine-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const name = document.getElementById('routine-name-input').value.trim();
+    if (!name) { toast('ルーティン名を入力してください'); return; }
+    if (routineDraftExercises.size === 0) { toast('種目を1つ以上選んでください'); return; }
+    const exercises = [...routineDraftExercises];
+    if (editingRoutineId) {
+      const r = state.routines.find(x => x.id === editingRoutineId);
+      if (r) { r.name = name; r.exercises = exercises; }
+    } else {
+      state.routines.push({ id: uid(), name, exercises });
+    }
+    persist('routines');
+    closeRoutineModal();
+    renderWorkout();
+    toast('ルーティンを保存しました');
+  });
+}
+
+function initPhotoResultModal() {
+  document.getElementById('photo-result-save').addEventListener('click', () => {
+    if (!pendingMealResult) return;
+    state.meals.push({
+      id: uid(),
+      date: todayStr(),
+      name: (pendingMealResult.name || '').trim() || '(名称不明)',
+      calories: Number(pendingMealResult.calories) || 0,
+      protein: Number(pendingMealResult.protein_g) || 0,
+      fat: Number(pendingMealResult.fat_g) || 0,
+      carbs: Number(pendingMealResult.carbs_g) || 0,
+    });
+    persist('meals');
+    closePhotoResultModal();
+    toast('🍚 記録しました');
+    renderTab(currentTab);
+  });
+  document.getElementById('photo-result-edit').addEventListener('click', () => {
+    const result = pendingMealResult;
+    closePhotoResultModal();
+    showTab('meal');
+    const form = document.getElementById('meal-form');
+    if (!result) return;
+    form.date.value = form.date.value || todayStr();
+    form.foodName.value = result.name ?? '';
+    form.calories.value = result.calories ?? '';
+    form.protein.value = result.protein_g ?? 0;
+    form.fat.value = result.fat_g ?? 0;
+    form.carbs.value = result.carbs_g ?? 0;
+    form.foodName.focus();
+  });
+  document.getElementById('photo-result-cancel').addEventListener('click', closePhotoResultModal);
+  document.getElementById('photo-result-modal').addEventListener('click', e => {
+    if (e.target.id === 'photo-result-modal') closePhotoResultModal();
+  });
+}
+
 function initForms() {
   document.getElementById('workout-form').addEventListener('submit', e => {
     e.preventDefault();
     const f = e.target;
-    state.workouts.push({
-      id: uid(),
-      date: f.date.value,
-      exercise: f.exercise.value.trim(),
-      weight: Number(f.weight.value),
-      reps: Number(f.reps.value),
-      sets: Number(f.sets.value),
-    });
+    const exercise = f.exercise.value.trim();
+    const weight = Number(f.weight.value);
+    const reps = Number(f.reps.value);
+    const sets = Number(f.sets.value);
+    const prevPB = getPB(exercise);
+
+    state.workouts.push({ id: uid(), date: f.date.value, exercise, weight, reps, sets });
     persist('workouts');
+
+    const newPB = getPB(exercise);
+    const isNewPB = newPB && (!prevPB || newPB.maxEst1RM > prevPB.maxEst1RM + 1e-9);
+
     f.exercise.value = '';
     f.weight.value = '';
     f.reps.value = '';
     f.sets.value = '1';
     selectedExerciseName = null;
-    toast('記録しました');
+    fillPrevValues(null);
+    renderExerciseInfo();
+
+    if (isNewPB) {
+      toast(`🎉 自己ベスト更新！ ${escapeHtml(exercise)} ${fmtNum(weight, 1)}kg×${reps}回`, { celebrate: true });
+    } else {
+      toast('記録しました');
+    }
     renderWorkout();
   });
 
@@ -876,10 +1177,62 @@ function initForms() {
     selectedExerciseName = name;
     document.querySelector('#workout-form [name="exercise"]').value = name;
     renderExerciseItemChips();
+    renderExerciseInfo();
+    fillPrevValues(name);
     document.querySelector('#workout-form [name="weight"]').focus();
   });
 
-  document.getElementById('workout-exercise-select').addEventListener('change', renderWorkoutProgressChart);
+  document.querySelector('#workout-form [name="exercise"]').addEventListener('change', e => {
+    const name = e.target.value.trim();
+    selectedExerciseName = name || null;
+    fillPrevValues(name);
+    renderExerciseInfo();
+  });
+
+  document.getElementById('routine-chips').addEventListener('click', e => {
+    const removeBtn = e.target.closest('[data-remove-routine]');
+    if (removeBtn) {
+      const id = removeBtn.getAttribute('data-remove-routine');
+      state.routines = state.routines.filter(r => r.id !== id);
+      persist('routines');
+      if (selectedRoutineId === id) selectedRoutineId = null;
+      renderRoutineChips();
+      updateExerciseFilterVisibility();
+      renderExerciseCategoryChips();
+      renderExerciseItemChips();
+      renderRoutineProgress();
+      return;
+    }
+    if (e.target.id === 'routine-add-chip') { openRoutineModal(null); return; }
+    const editEl = e.target.closest('[data-edit-routine]');
+    if (editEl && routineEditMode) {
+      const id = editEl.getAttribute('data-edit-routine');
+      const r = state.routines.find(x => x.id === id);
+      if (r) openRoutineModal(r);
+      return;
+    }
+    const selectEl = e.target.closest('[data-routine]');
+    if (selectEl && !routineEditMode) {
+      const id = selectEl.getAttribute('data-routine');
+      selectedRoutineId = id || null;
+      renderRoutineChips();
+      updateExerciseFilterVisibility();
+      renderExerciseCategoryChips();
+      renderExerciseItemChips();
+      renderRoutineProgress();
+    }
+  });
+
+  document.getElementById('routine-edit-toggle').addEventListener('click', () => {
+    routineEditMode = !routineEditMode;
+    document.getElementById('routine-edit-toggle').textContent = routineEditMode ? '完了' : '編集';
+    renderRoutineChips();
+  });
+
+  document.getElementById('workout-exercise-select').addEventListener('change', () => {
+    renderWorkoutProgressChart();
+    renderWorkoutPB();
+  });
 
   document.getElementById('workout-history').addEventListener('click', e => {
     const id = e.target.getAttribute('data-del-workout');
@@ -914,6 +1267,10 @@ function initForms() {
   document.getElementById('meal-history-date').addEventListener('change', renderMealHistory);
 
   document.getElementById('photo-analyze-btn').addEventListener('click', () => {
+    document.getElementById('photo-input').click();
+  });
+
+  document.getElementById('fab-photo').addEventListener('click', () => {
     document.getElementById('photo-input').click();
   });
 
@@ -986,6 +1343,8 @@ function init() {
   initNav();
   initForms();
   initSettings();
+  initRoutineModal();
+  initPhotoResultModal();
   showTab('home');
 
   if ('serviceWorker' in navigator) {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ftrack-cache-v4';
+const CACHE_NAME = 'ftrack-cache-v5';
 const ASSETS = [
   './',
   './index.html',

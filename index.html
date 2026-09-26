@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>筋トレ&食事管理</title>
-<meta name="theme-color" content="#111827">
+<meta name="theme-color" content="#ff5a36">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -26,7 +26,9 @@
 <main id="app">
 
   <!-- ホーム -->
-  <section class="tab-panel" id="panel-home" data-panel="home">
+  <section class="tab-panel accent-home" id="panel-home" data-panel="home">
+    <div class="streak-banner hidden" id="home-streak-banner"></div>
+
     <div class="card" id="home-phase-card"></div>
 
     <div class="card">
@@ -47,7 +49,7 @@
   </section>
 
   <!-- 筋トレ -->
-  <section class="tab-panel hidden" id="panel-workout" data-panel="workout">
+  <section class="tab-panel hidden accent-workout" id="panel-workout" data-panel="workout">
     <form class="card form" id="workout-form">
       <div class="card-title">セットを記録</div>
       <label>日付
@@ -55,11 +57,19 @@
       </label>
 
       <div class="card-title-row">
+        <div class="field-label" style="margin-bottom:0">メニュー</div>
+        <button type="button" id="routine-edit-toggle" class="btn-inline">編集</button>
+      </div>
+      <div class="chip-row" id="routine-chips"></div>
+      <div class="routine-progress hidden" id="routine-progress"></div>
+
+      <div class="card-title-row">
         <div class="field-label" style="margin-bottom:0">部位から種目を選ぶ</div>
         <button type="button" id="exercise-edit-toggle" class="btn-inline">編集</button>
       </div>
       <div class="chip-row" id="exercise-category-chips"></div>
       <div class="chip-grid" id="exercise-item-chips"></div>
+      <div class="exercise-info hidden" id="exercise-info"></div>
 
       <label>種目
         <input type="text" name="exercise" list="exercise-list" placeholder="例: ベンチプレス" required>
@@ -76,6 +86,7 @@
           <input type="number" name="sets" step="1" min="1" value="1" inputmode="numeric" required>
         </label>
       </div>
+      <div class="hint-text hidden" id="workout-prev-hint"></div>
       <button type="submit" class="btn-primary">記録する</button>
     </form>
 
@@ -84,6 +95,7 @@
         <div class="card-title">種目ごとの推移</div>
         <select id="workout-exercise-select"></select>
       </div>
+      <div class="pb-info hidden" id="workout-pb-info"></div>
       <canvas id="workout-progress-chart" height="120" data-h="120"></canvas>
       <div id="workout-progress-empty" class="muted small hidden">この種目の記録はまだありません</div>
     </div>
@@ -95,7 +107,7 @@
   </section>
 
   <!-- 食事 -->
-  <section class="tab-panel hidden" id="panel-meal" data-panel="meal">
+  <section class="tab-panel hidden accent-meal" id="panel-meal" data-panel="meal">
     <div class="card">
       <div class="card-title">写真から記録</div>
       <button type="button" id="photo-analyze-btn" class="btn-primary">📷 写真を撮って解析する</button>
@@ -144,7 +156,7 @@
   </section>
 
   <!-- 体重 -->
-  <section class="tab-panel hidden" id="panel-weight" data-panel="weight">
+  <section class="tab-panel hidden accent-weight" id="panel-weight" data-panel="weight">
     <form class="card form" id="weight-form">
       <div class="card-title">体重を記録</div>
       <label>日付
@@ -174,7 +186,7 @@
   </section>
 
   <!-- 目標 -->
-  <section class="tab-panel hidden" id="panel-goal" data-panel="goal">
+  <section class="tab-panel hidden accent-goal" id="panel-goal" data-panel="goal">
     <form class="card form" id="goal-form">
       <div class="card-title">目標設定</div>
       <label>現在のフェーズ
@@ -224,21 +236,23 @@
 
 <nav class="bottom-nav">
   <button class="nav-btn active" data-target="home">
-    <span class="nav-icon">🏠</span><span>ホーム</span>
+    <span class="nav-icon-wrap"><span class="nav-icon">🏠</span></span><span>ホーム</span>
   </button>
   <button class="nav-btn" data-target="workout">
-    <span class="nav-icon">🏋️</span><span>筋トレ</span>
+    <span class="nav-icon-wrap"><span class="nav-icon">🏋️</span></span><span>筋トレ</span>
   </button>
   <button class="nav-btn" data-target="meal">
-    <span class="nav-icon">🍚</span><span>食事</span>
+    <span class="nav-icon-wrap"><span class="nav-icon">🍚</span></span><span>食事</span>
   </button>
   <button class="nav-btn" data-target="weight">
-    <span class="nav-icon">⚖️</span><span>体重</span>
+    <span class="nav-icon-wrap"><span class="nav-icon">⚖️</span></span><span>体重</span>
   </button>
   <button class="nav-btn" data-target="goal">
-    <span class="nav-icon">🎯</span><span>目標</span>
+    <span class="nav-icon-wrap"><span class="nav-icon">🎯</span></span><span>目標</span>
   </button>
 </nav>
+
+<button type="button" id="fab-photo" class="fab" aria-label="写真で食事を記録">📷</button>
 
 <div id="toast" class="toast hidden"></div>
 
@@ -258,6 +272,38 @@
       <button type="submit" class="btn-primary">保存</button>
       <button type="button" id="settings-close-btn" class="btn-secondary" style="margin-top:8px">閉じる</button>
     </form>
+  </div>
+</div>
+
+<div id="routine-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="card-title" id="routine-modal-title">ルーティンを作成</div>
+    <form id="routine-form" class="form">
+      <label>ルーティン名
+        <input type="text" id="routine-name-input" placeholder="例: 胸の日" required>
+      </label>
+      <div class="field-label">含める種目を選択</div>
+      <div id="routine-exercise-picker"></div>
+      <button type="submit" class="btn-primary">保存</button>
+      <button type="button" id="routine-modal-close" class="btn-secondary" style="margin-top:8px">キャンセル</button>
+    </form>
+  </div>
+</div>
+
+<div id="photo-result-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="card-title">解析結果</div>
+    <div class="photo-result-name" id="photo-result-name"></div>
+    <div class="summary-grid summary-grid-4" style="margin:14px 0">
+      <div><div class="num" id="photo-result-cal">-</div><div class="lbl">kcal</div></div>
+      <div><div class="num" id="photo-result-p">-</div><div class="lbl">P(g)</div></div>
+      <div><div class="num" id="photo-result-f">-</div><div class="lbl">F(g)</div></div>
+      <div><div class="num" id="photo-result-c">-</div><div class="lbl">C(g)</div></div>
+    </div>
+    <div class="muted small" style="margin-bottom:12px">AI(Gemini)による推定値です。内容を確認してください。</div>
+    <button type="button" id="photo-result-save" class="btn-primary">✅ この内容で記録する</button>
+    <button type="button" id="photo-result-edit" class="btn-secondary" style="margin-top:8px">✏️ 修正する</button>
+    <button type="button" id="photo-result-cancel" class="btn-inline" style="margin-top:8px;width:100%">キャンセル</button>
   </div>
 </div>
 
